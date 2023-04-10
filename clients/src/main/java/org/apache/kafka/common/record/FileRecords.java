@@ -47,6 +47,7 @@ public class FileRecords extends AbstractRecords implements Closeable {
     private final Iterable<FileLogInputStream.FileChannelRecordBatch> batches;
 
     // mutable state
+    // 当前log写入的消息总量
     private final AtomicInteger size;
     private final FileChannel channel;
     private volatile File file;
@@ -181,11 +182,13 @@ public class FileRecords extends AbstractRecords implements Closeable {
      * @return the number of bytes written to the underlying file
      */
     public int append(MemoryRecords records) throws IOException {
+        // 如果继续写入records数据，那么文件的大小将超过Integer.MAX_VALUE，此时抛出异常；即log文件的大小不能超过2G
         if (records.sizeInBytes() > Integer.MAX_VALUE - size.get())
             throw new IllegalArgumentException("Append of size " + records.sizeInBytes() +
                     " bytes is too large for segment with current file position at " + size.get());
-
+        // 将信息写入至文件中，注意：这里语言层面并不能保证一次将所有byte都写入至file中，可能需要多次循环
         int written = records.writeFullyTo(channel);
+        // 已经写入的增加，size标记着当前文件已经写入的消息总量
         size.getAndAdd(written);
         return written;
     }

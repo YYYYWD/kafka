@@ -99,21 +99,21 @@ object LeaderHwChange {
  *
  */
 case class LogAppendInfo(var firstOffset: Option[LogOffsetMetadata],
-                         var lastOffset: Long,
+                         var lastOffset: Long,  // 消息集合最后一条消息的位移值
                          var lastLeaderEpoch: Option[Int],
-                         var maxTimestamp: Long,
-                         var offsetOfMaxTimestamp: Long,
-                         var logAppendTime: Long,
-                         var logStartOffset: Long,
-                         var recordConversionStats: RecordConversionStats,
-                         sourceCodec: CompressionCodec,
-                         targetCodec: CompressionCodec,
-                         shallowCount: Int,
-                         validBytes: Int,
-                         offsetsMonotonic: Boolean,
-                         lastOffsetOfFirstBatch: Long,
-                         recordErrors: Seq[RecordError] = List(),
-                         errorMessage: String = null,
+                         var maxTimestamp: Long,  // 消息集合最大消息时间戳
+                         var offsetOfMaxTimestamp: Long,  // 消息集合最大消息时间戳所属消息的位移值
+                         var logAppendTime: Long, // 写入消息时间戳
+                         var logStartOffset: Long,  // 消息集合首条消息的位移值
+                         var recordConversionStats: RecordConversionStats,  // 消息转换统计类，里面记录了执行了格式转换的消息数等数据
+                         sourceCodec: CompressionCodec,   // 消息集合中消息使用的压缩器（Compressor）类型，比如是Snappy还是LZ4
+                         targetCodec: CompressionCodec,   // 写入消息时需要使用的压缩器类型
+                         shallowCount: Int,               // 消息批次数，每个消息批次下可能包含多条消息
+                         validBytes: Int,                 // 写入消息总字节数
+                         offsetsMonotonic: Boolean,       // 消息位移值是否是顺序增加的
+                         lastOffsetOfFirstBatch: Long,    // 消息批次中最后一条消息的位移
+                         recordErrors: Seq[RecordError] = List(),   // 写入消息时出现的异常列表
+                         errorMessage: String = null,         // 错误码
                          leaderHwChange: LeaderHwChange = LeaderHwChange.None) {
   /**
    * Get the first offset if it exists, else get the last offset of the first batch
@@ -291,7 +291,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
 
   locally {
     initializePartitionMetadata()
-    updateLogStartOffset(logStartOffset)
+    updateLogStartOffset(logStartOffset)    //初始化log start offset
     maybeIncrementFirstUnstableOffset()
     initializeTopicId()
   }
@@ -413,7 +413,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
    * @return the old high watermark, if updated by the new value
    */
   def maybeIncrementHighWatermark(newHighWatermark: LogOffsetMetadata): Option[LogOffsetMetadata] = {
-    if (newHighWatermark.messageOffset > logEndOffset)
+    if (newHighWatermark.messageOffset > logEndOffset)//Hw的值不能超过LEO
       throw new IllegalArgumentException(s"High watermark $newHighWatermark update exceeds current " +
         s"log end offset ${localLog.logEndOffsetMetadata}")
 
@@ -458,17 +458,17 @@ class UnifiedLog(@volatile var logStartOffset: Long,
    * known, this will do a lookup in the index and cache the result.
    */
   private def fetchHighWatermarkMetadata: LogOffsetMetadata = {
-    localLog.checkIfMemoryMappedBufferClosed()
+    localLog.checkIfMemoryMappedBufferClosed()  // 读取时确保日志不能被关闭
 
-    val offsetMetadata = highWatermarkMetadata
-    if (offsetMetadata.messageOffsetOnly) {
+    val offsetMetadata = highWatermarkMetadata  // 保存当前高水位值到本地变量，避免多线程访问干扰
+    if (offsetMetadata.messageOffsetOnly) { //没有获得到完整的高水位元数据
       lock.synchronized {
-        val fullOffset = convertToOffsetMetadataOrThrow(highWatermark)
-        updateHighWatermarkMetadata(fullOffset)
+        val fullOffset = convertToOffsetMetadataOrThrow(highWatermark)// 通过读日志文件的方式把完整的高水位元数据信息拉出来
+        updateHighWatermarkMetadata(fullOffset) // 然后再更新一下高水位对象
         fullOffset
       }
     } else {
-      offsetMetadata
+      offsetMetadata  // 否则，直接返回即可
     }
   }
 
@@ -476,7 +476,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
     if (newHighWatermark.messageOffset < 0)
       throw new IllegalArgumentException("High watermark offset should be non-negative")
 
-    lock synchronized {
+    lock synchronized { //加锁更新高水位的值
       if (newHighWatermark.messageOffset < highWatermarkMetadata.messageOffset) {
         warn(s"Non-monotonic update of high watermark from $highWatermarkMetadata to $newHighWatermark")
       }
@@ -806,22 +806,25 @@ class UnifiedLog(@volatile var logStartOffset: Long,
     // We want to ensure the partition metadata file is written to the log dir before any log data is written to disk.
     // This will ensure that any log data can be recovered with the correct topic ID in the case of failure.
     maybeFlushMetadataFile()
-
+    // 第1步：分析和验证待写入消息集合，并返回校验结果
     val appendInfo = analyzeAndValidateRecords(records, origin, ignoreRecordSize, leaderEpoch)
 
     // return if we have no valid messages or if this is a duplicate of the last appended entry
+    // 如果压根就不需要写入任何消息，直接返回即可
     if (appendInfo.shallowCount == 0) appendInfo
     else {
 
       // trim any invalid bytes or partial messages before appending it to the on-disk log
+      // 第2步：消息格式规整，即删除无效格式消息或无效字节
       var validRecords = trimInvalidBytes(records, appendInfo)
 
       // they are valid, insert them in the log
-      lock synchronized {
+      lock synchronized { //加锁，避免多个生产者同时写入这个Log
         maybeHandleIOException(s"Error while appending records to $topicPartition in dir ${dir.getParent}") {
-          localLog.checkIfMemoryMappedBufferClosed()
-          if (validateAndAssignOffsets) {
+          localLog.checkIfMemoryMappedBufferClosed()    // 确保Log对象未关闭
+          if (validateAndAssignOffsets) { // 需要分配位移
             // assign offsets to the message set
+            // 第3步：使用当前LEO值作为待写入消息集合中第一条消息的位移值
             val offset = new LongRef(localLog.logEndOffset)
             appendInfo.firstOffset = Some(LogOffsetMetadata(offset.value))
             val now = time.milliseconds
@@ -847,6 +850,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
               case e: IOException =>
                 throw new KafkaException(s"Error validating messages while appending to log $name", e)
             }
+            // 更新校验结果对象类LogAppendInfo
             validRecords = validateAndOffsetAssignResult.validatedRecords
             appendInfo.maxTimestamp = validateAndOffsetAssignResult.maxTimestamp
             appendInfo.offsetOfMaxTimestamp = validateAndOffsetAssignResult.shallowOffsetOfMaxTimestamp
@@ -857,6 +861,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
 
             // re-validate message sizes if there's a possibility that they have changed (due to re-compression or message
             // format conversion)
+            // 第4步：验证消息，确保消息大小不超限
             if (!ignoreRecordSize && validateAndOffsetAssignResult.messageSizeMaybeChanged) {
               validRecords.batches.forEach { batch =>
                 if (batch.sizeInBytes > config.maxMessageSize) {
@@ -869,9 +874,9 @@ class UnifiedLog(@volatile var logStartOffset: Long,
                 }
               }
             }
-          } else {
+          } else {// 直接使用给定的位移值，无需自己分配位移值
             // we are taking the offsets we are given
-            if (!appendInfo.offsetsMonotonic)
+            if (!appendInfo.offsetsMonotonic) // 确保消息位移值的单调递增性
               throw new OffsetsOutOfOrderException(s"Out of order offsets found in append to $topicPartition: " +
                 records.records.asScala.map(_.offset))
 
@@ -895,6 +900,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
           }
 
           // update the epoch cache with the epoch stamped onto the message by the leader
+          // 第5步：更新Leader Epoch缓存
           validRecords.batches.forEach { batch =>
             if (batch.magic >= RecordBatch.MAGIC_VALUE_V2) {
               maybeAssignEpochStartOffset(batch.partitionLeaderEpoch, batch.baseOffset)
@@ -910,12 +916,14 @@ class UnifiedLog(@volatile var logStartOffset: Long,
           }
 
           // check messages set size may be exceed config.segmentSize
+          // 第6步：确保消息大小不超限
           if (validRecords.sizeInBytes > config.segmentSize) {
             throw new RecordBatchTooLargeException(s"Message batch size is ${validRecords.sizeInBytes} bytes in append " +
               s"to partition $topicPartition, which exceeds the maximum configured segment size of ${config.segmentSize}.")
           }
 
           // maybe roll the log if this segment is full
+          // 第7步：执行日志切分。当前日志段剩余容量可能无法容纳新消息集合，因此有必要创建一个新的日志段来保存待写入的所有消息
           val segment = maybeRoll(validRecords.sizeInBytes, appendInfo)
 
           val logOffsetMetadata = LogOffsetMetadata(
@@ -925,6 +933,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
 
           // now that we have valid records, offsets assigned, and timestamps updated, we need to
           // validate the idempotent/transactional state of the producers and collect some metadata
+          // 第8步：验证事务状态
           val (updatedProducers, completedTxns, maybeDuplicate) = analyzeAndValidateProducerState(
             logOffsetMetadata, validRecords, origin)
 
@@ -946,10 +955,14 @@ class UnifiedLog(@volatile var logStartOffset: Long,
               // will be cleaned up after the log directory is recovered. Note that the end offset of the
               // ProducerStateManager will not be updated and the last stable offset will not advance
               // if the append to the transaction index fails.
+              // 第9步：执行真正的消息写入操作，主要调用日志段对象的append方法实现
               localLog.append(appendInfo.lastOffset, appendInfo.maxTimestamp, appendInfo.offsetOfMaxTimestamp, validRecords)
+              // 第10步：更新LEO对象，其中，LEO值是消息集合中最后一条消息位移值+1
+              // 前面说过，LEO值永远指向下一条不存在的消息
               updateHighWatermarkWithLogEndOffset()
 
               // update the producer state
+              // 第11步：更新事务状态
               updatedProducers.values.foreach(producerAppendInfo => producerStateManager.update(producerAppendInfo))
 
               // update the transaction index with the true last stable offset. The last offset visible
@@ -972,8 +985,11 @@ class UnifiedLog(@volatile var logStartOffset: Long,
                 s"next offset: ${localLog.logEndOffset}, " +
                 s"and messages: $validRecords")
 
+              // 是否需要手动落盘。一般情况下我们不需要设置Broker端参数log.flush.interval.messages
+              // 落盘操作交由操作系统来完成。但某些情况下，可以设置该参数来确保高可靠性
               if (localLog.unflushedMessages >= config.flushInterval) flush(false)
           }
+          // 第12步：返回写入结果
           appendInfo
         }
       }
@@ -1125,6 +1141,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
         throw new InvalidRecordException("Append from Raft leader did not set the batch epoch correctly")
       }
       // we only validate V2 and higher to avoid potential compatibility issues with older clients
+      // 消息格式Version 2的消息批次，起始位移值必须从0开始
       if (batch.magic >= RecordBatch.MAGIC_VALUE_V2 && origin == AppendOrigin.Client && batch.baseOffset != 0)
         throw new InvalidRecordException(s"The baseOffset of the record batch in the append to $topicPartition should " +
           s"be 0, but it is ${batch.baseOffset}")
@@ -1137,12 +1154,14 @@ class UnifiedLog(@volatile var logStartOffset: Long,
       // Also indicate whether we have the accurate first offset or not
       if (!readFirstMessage) {
         if (batch.magic >= RecordBatch.MAGIC_VALUE_V2)
-          firstOffset = Some(LogOffsetMetadata(batch.baseOffset))
-        lastOffsetOfFirstBatch = batch.lastOffset
+          firstOffset = Some(LogOffsetMetadata(batch.baseOffset)) // 更新firstOffset字段
+        lastOffsetOfFirstBatch = batch.lastOffset // 更新lastOffsetOfFirstBatch字段
         readFirstMessage = true
       }
 
       // check that offsets are monotonically increasing
+      // 一旦出现当前lastOffset不小于下一个batch的lastOffset，说明上一个batch中有消息的位移值大于后面batch的消息
+      // 这违反了位移值单调递增性
       if (lastOffset >= batch.lastOffset)
         monotonic = false
 
@@ -1151,6 +1170,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
       lastLeaderEpoch = batch.partitionLeaderEpoch
 
       // Check if the message sizes are valid.
+      // 检查消息批次总字节数大小是否超限，即是否大于Broker端参数max.message.bytes值
       val batchSize = batch.sizeInBytes
       if (!ignoreRecordSize && batchSize > config.maxMessageSize) {
         brokerTopicStats.topicStats(topicPartition.topic).bytesRejectedRate.mark(records.sizeInBytes)
@@ -1160,30 +1180,34 @@ class UnifiedLog(@volatile var logStartOffset: Long,
       }
 
       // check the validity of the message by checking CRC
+      // 执行消息批次校验，包括格式是否正确以及CRC校验
       if (!batch.isValid) {
         brokerTopicStats.allTopicsStats.invalidMessageCrcRecordsPerSec.mark()
         throw new CorruptRecordException(s"Record is corrupt (stored crc = ${batch.checksum()}) in topic partition $topicPartition.")
       }
-
+      // 更新maxTimestamp字段和offsetOfMaxTimestamp
       if (batch.maxTimestamp > maxTimestamp) {
         maxTimestamp = batch.maxTimestamp
         offsetOfMaxTimestamp = lastOffset
       }
-
+      // 累加消息批次计数器以及有效字节数，更新shallowMessageCount字段
       shallowMessageCount += 1
       validBytesCount += batchSize
-
+      // 从消息批次中获取压缩器类型
       val messageCodec = CompressionCodec.getCompressionCodec(batch.compressionType.id)
       if (messageCodec != NoCompressionCodec)
         sourceCodec = messageCodec
     }
 
     // Apply broker-side compression if any
+    // 获取Broker端设置的压缩器类型，即Broker端参数compression.type值。
+    // 该参数默认值是producer，表示sourceCodec用的什么压缩器，targetCodec就用什么
     val targetCodec = BrokerCompressionCodec.getTargetCompressionCodec(config.compressionType, sourceCodec)
     val lastLeaderEpochOpt: Option[Int] = if (lastLeaderEpoch != RecordBatch.NO_PARTITION_LEADER_EPOCH)
       Some(lastLeaderEpoch)
     else
       None
+    // 最后生成LogAppendInfo对象并返回
     LogAppendInfo(firstOffset, lastOffset, lastLeaderEpochOpt, maxTimestamp, offsetOfMaxTimestamp, RecordBatch.NO_TIMESTAMP, logStartOffset,
       RecordConversionStats.EMPTY, sourceCodec, targetCodec, shallowMessageCount, validBytesCount, monotonic, lastOffsetOfFirstBatch)
   }
@@ -1226,11 +1250,15 @@ class UnifiedLog(@volatile var logStartOffset: Long,
    * @throws OffsetOutOfRangeException If startOffset is beyond the log end offset or before the log start offset
    * @return The fetch data information including fetch starting offset metadata and messages read.
    */
-  def read(startOffset: Long,
-           maxLength: Int,
-           isolation: FetchIsolation,
-           minOneMessage: Boolean): FetchDataInfo = {
+  def read(startOffset: Long, //即从Log对象的哪个位移值开始读消息
+           maxLength: Int,  //即最多能读取多少字节
+           isolation: FetchIsolation, //设置读取隔离级别，主要控制能够读取的最大位移值，多用于Kafka事务
+           minOneMessage: Boolean): FetchDataInfo = { //即是否允许至少读一条消息。设想如果消息很大，超过了maxLength，正常情况下read方法永远不会返回任何消息。但如果设置了该参数为true，read方法就保证至少能够返回一条消息。
     checkLogStartOffset(startOffset)
+    // 查看一下读取隔离级别设置。
+    // 普通消费者能够看到[Log Start Offset, 高水位值)之间的消息
+    // 事务型消费者只能看到[Log Start Offset, Log Stable Offset]之间的消息。Log Stable Offset(LSO)是比LEO值小的位移值，为Kafka事务使用
+    // Follower副本消费者能够看到[Log Start Offset，LEO)之间的消息
     val maxOffsetMetadata = isolation match {
       case FetchLogEnd => localLog.logEndOffsetMetadata
       case FetchHighWatermark => fetchHighWatermarkMetadata
@@ -1379,9 +1407,9 @@ class UnifiedLog(@volatile var logStartOffset: Long,
         predicate(segment, nextSegmentOpt)
     }
     lock synchronized {
-      val deletable = localLog.deletableSegments(shouldDelete)
+      val deletable = localLog.deletableSegments(shouldDelete)  //找到需要删除的logSegment
       if (deletable.nonEmpty)
-        deleteSegments(deletable, reason)
+        deleteSegments(deletable, reason)   //真正执行日志删除的函数
       else
         0
     }
@@ -1392,18 +1420,21 @@ class UnifiedLog(@volatile var logStartOffset: Long,
       val numToDelete = deletable.size
       if (numToDelete > 0) {
         // we must always have at least one segment, so if we are going to delete all the segments, create a new one first
+        // 不允许删除所有日志段对象。如果一定要做，先创建出一个新的来，然后再把前面N个删掉
         var segmentsToDelete = deletable
         if (localLog.segments.numberOfSegments == numToDelete) {
           val newSegment = roll()
           if (deletable.last.baseOffset == newSegment.baseOffset) {
             warn(s"Empty active segment at ${deletable.last.baseOffset} was deleted and recreated due to $reason")
-            segmentsToDelete = deletable.dropRight(1)
+            segmentsToDelete = deletable.dropRight(1)   //去掉最右边的一个segment，保证还剩下一个不被删除。
           }
         }
-        localLog.checkIfMemoryMappedBufferClosed()
+        localLog.checkIfMemoryMappedBufferClosed()  // 确保Log对象没有被关闭
         // remove the segments for lookups
+        // 删除给定的日志段对象以及底层的物理文件
         localLog.removeAndDeleteSegments(segmentsToDelete, asyncDelete = true, reason)
         deleteProducerSnapshots(deletable, asyncDelete = true)
+        // 尝试更新日志的Log Start Offset值
         maybeIncrementLogStartOffset(localLog.segments.firstSegmentBaseOffset.get, SegmentDeletion)
       }
       numToDelete
@@ -1497,7 +1528,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
     val maxTimestampInMessages = appendInfo.maxTimestamp
     val maxOffsetInMessages = appendInfo.lastOffset
 
-    if (segment.shouldRoll(RollParams(config, appendInfo, messagesSize, now))) {
+    if (segment.shouldRoll(RollParams(config, appendInfo, messagesSize, now))) { //判断是否需要滚动日志
       debug(s"Rolling new log segment (log_size = ${segment.size}/${config.segmentSize}}, " +
         s"offset_index_size = ${segment.offsetIndex.entries}/${segment.offsetIndex.maxEntries}, " +
         s"time_index_size = ${segment.timeIndex.entries}/${segment.timeIndex.maxEntries}, " +
@@ -1520,7 +1551,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
         .map(_.messageOffset)
         .getOrElse(maxOffsetInMessages - Integer.MAX_VALUE)
 
-      roll(Some(rollOffset))
+      roll(Some(rollOffset))    //滚动日志
     } else {
       segment
     }

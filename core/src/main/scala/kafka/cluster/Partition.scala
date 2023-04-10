@@ -447,7 +447,7 @@ class Partition(val topicPartition: TopicPartition,
   /**
    * Returns true if this node is currently leader for the Partition.
    */
-  def isLeader: Boolean = leaderReplicaIdOpt.contains(localBrokerId)
+  def isLeader: Boolean = leaderReplicaIdOpt.contains(localBrokerId) //存储了该partition的leader副本所在的broker的brokerId
 
   def leaderIdIfLocal: Option[Int] = {
     leaderReplicaIdOpt.filter(_ == localBrokerId)
@@ -1152,13 +1152,13 @@ class Partition(val topicPartition: TopicPartition,
   def appendRecordsToLeader(records: MemoryRecords, origin: AppendOrigin, requiredAcks: Int,
                             requestLocal: RequestLocal): LogAppendInfo = {
     val (info, leaderHWIncremented) = inReadLock(leaderIsrUpdateLock) {
-      leaderLogIfLocal match {
+      leaderLogIfLocal match {  //检查当前broker是否为分区的leader副本
         case Some(leaderLog) =>
-          val minIsr = leaderLog.config.minInSyncReplicas
-          val inSyncSize = partitionState.isr.size
+          val minIsr = leaderLog.config.minInSyncReplicas   //要求的最小Isr数量
+          val inSyncSize = partitionState.isr.size    //当前的Isr数量
 
           // Avoid writing to leader if there are not enough insync replicas to make it safe
-          if (inSyncSize < minIsr && requiredAcks == -1) {
+          if (inSyncSize < minIsr && requiredAcks == -1) {  //如果当前Isr小于最小的Isr抛出异常
             throw new NotEnoughReplicasException(s"The size of the current ISR ${partitionState.isr} " +
               s"is insufficient to satisfy the min.isr requirement of $minIsr for partition $topicPartition")
           }
@@ -1167,7 +1167,7 @@ class Partition(val topicPartition: TopicPartition,
             interBrokerProtocolVersion, requestLocal)
 
           // we may need to increment high watermark since ISR could be down to 1
-          (info, maybeIncrementLeaderHW(leaderLog))
+          (info, maybeIncrementLeaderHW(leaderLog)) //可能需要变更该分区的HW
 
         case None =>
           throw new NotLeaderOrFollowerException("Leader not local for partition %s on broker %d"
@@ -1292,8 +1292,8 @@ class Partition(val topicPartition: TopicPartition,
 
   private def readRecords(
     localLog: UnifiedLog,
-    lastFetchedEpoch: Optional[Integer],
-    fetchOffset: Long,
+    lastFetchedEpoch: Optional[Integer],    //如果存在，是follow副本中最新的LeaderEpoch的epoch
+    fetchOffset: Long,    //每个分区的读取位置
     currentLeaderEpoch: Optional[Integer],
     maxBytes: Int,
     fetchIsolation: FetchIsolation,

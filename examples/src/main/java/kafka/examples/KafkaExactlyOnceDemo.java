@@ -34,38 +34,38 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * This exactly once demo driver takes 3 arguments:
- *   - partition: number of partitions for input/output topic
- *   - instances: number of instances
- *   - records: number of records
+ * - partition: number of partitions for input/output topic
+ * - instances: number of instances
+ * - records: number of records
  * An example argument list would be `6 3 50000`.
- *
+ * <p>
  * If you are using IntelliJ IDEA, the above arguments should be put in the configuration's `Program Arguments`.
  * Also recommended to set an output log file by `Edit Configuration -> Logs -> Save console
  * output to file` to record all the log output together.
- *
+ * <p>
  * The driver could be decomposed as following stages:
- *
+ * <p>
  * 1. Cleanup any topic whose name conflicts with input and output topic, so that we have a clean-start.
- *
+ * <p>
  * 2. Set up a producer in a separate thread to pre-populate a set of records with even number keys into
- *    the input topic. The driver will block for the record generation to finish, so the producer
- *    must be in synchronous sending mode.
- *
+ * the input topic. The driver will block for the record generation to finish, so the producer
+ * must be in synchronous sending mode.
+ * <p>
  * 3. Set up transactional instances in separate threads which does a consume-process-produce loop,
- *    tailing data from input topic (See {@link ExactlyOnceMessageProcessor}). Each EOS instance will
- *    drain all the records from either given partitions or auto assigned partitions by actively
- *    comparing log end offset with committed offset. Each record will be processed exactly once
- *    as dividing the key by 2, and extend the value message. The driver will block for all the record
- *    processing to finish. The transformed record shall be written to the output topic, with
- *    transactional guarantee.
- *
+ * tailing data from input topic (See {@link ExactlyOnceMessageProcessor}). Each EOS instance will
+ * drain all the records from either given partitions or auto assigned partitions by actively
+ * comparing log end offset with committed offset. Each record will be processed exactly once
+ * as dividing the key by 2, and extend the value message. The driver will block for all the record
+ * processing to finish. The transformed record shall be written to the output topic, with
+ * transactional guarantee.
+ * <p>
  * 4. Set up a read committed consumer in a separate thread to verify we have all records within
- *    the output topic, while the message ordering on partition level is maintained.
- *    The driver will block for the consumption of all committed records.
- *
+ * the output topic, while the message ordering on partition level is maintained.
+ * The driver will block for the consumption of all committed records.
+ * <p>
  * From this demo, you could see that all the records from pre-population are processed exactly once,
  * with strong partition level ordering guarantee.
- *
+ * <p>
  * Note: please start the kafka broker and zookeeper in local first. The broker version must be >= 2.5
  * in order to run, otherwise the app could throw
  * {@link org.apache.kafka.common.errors.UnsupportedVersionException}.

@@ -586,6 +586,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     // The construction of ProduceResponse is able to accept auto-generated protocol data so
     // KafkaApis#handleProduceRequest should apply auto-generated protocol to avoid extra conversion.
     // https://issues.apache.org/jira/browse/KAFKA-10730
+    //发送响应的回调函数
     @nowarn("cat=deprecation")
     def sendResponseCallback(responseStatus: Map[TopicPartition, PartitionResponse]): Unit = {
       val mergedResponseStatus = responseStatus ++ unauthorizedTopicResponses ++ nonExistingTopicResponses ++ invalidRequestResponses
@@ -657,7 +658,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       val internalTopicsAllowed = request.header.clientId == AdminUtils.AdminClientId
 
       // call the replica manager to append messages to the replicas
-      replicaManager.appendRecords(
+      replicaManager.appendRecords(   //正式写入消息的入口
         timeout = produceRequest.timeout.toLong,
         requiredAcks = produceRequest.acks,
         internalTopicsAllowed = internalTopicsAllowed,
@@ -959,18 +960,18 @@ class KafkaApis(val requestChannel: RequestChannel,
         None
       }
 
-      val params = FetchParams(
+      val params = FetchParams( //构造拉取消息的参数
         requestVersion = versionId,
         replicaId = fetchRequest.replicaId,
-        maxWaitMs = fetchRequest.maxWait,
+          maxWaitMs = fetchRequest.maxWait,
         minBytes = fetchMinBytes,
         maxBytes = fetchMaxBytes,
         isolation = FetchIsolation(fetchRequest),
         clientMetadata = clientMetadata
       )
 
-      // call the replica manager to fetch messages from the local replica
-      replicaManager.fetchMessages(
+      // call the replica manager to  fetch messages from the local replica
+      replicaManager.fetchMessages(   //拉取消息
         params = params,
         fetchInfos = interesting,
         quota = replicationQuota(fetchRequest),

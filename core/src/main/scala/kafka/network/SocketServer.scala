@@ -953,9 +953,9 @@ private[kafka] class Processor(
       while (shouldRun.get()) {
         try {
           // setup any new connections that have been queued up
-          configureNewConnections()
+          configureNewConnections() //处理新到来的连接
           // register any new responses for writing
-          processNewResponses()
+          processNewResponses() //  处理response队列中的response
           poll()
           processCompletedReceives()
           processCompletedSends()

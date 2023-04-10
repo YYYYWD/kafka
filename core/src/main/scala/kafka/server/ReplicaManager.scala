@@ -70,7 +70,7 @@ import scala.compat.java8.OptionConverters._
 /*
  * Result metadata of a log append operation on the log
  */
-case class LogAppendResult(info: LogAppendInfo, exception: Option[Throwable] = None) {
+case class  LogAppendResult(info: LogAppendInfo, exception: Option[Throwable] = None) {
   def error: Errors = exception match {
     case None => Errors.NONE
     case Some(e) => Errors.forException(e)
@@ -598,6 +598,7 @@ class ReplicaManager(val config: KafkaConfig,
                     requestLocal: RequestLocal = RequestLocal.NoCaching): Unit = {
     if (isValidRequiredAcks(requiredAcks)) {
       val sTime = time.milliseconds
+      // 开始写入本地log
       val localProduceResults = appendToLocalLog(internalTopicsAllowed = internalTopicsAllowed,
         origin, entriesPerPartition, requiredAcks, requestLocal)
       debug("Produce to local log in %d ms".format(time.milliseconds - sTime))
@@ -952,9 +953,9 @@ class ReplicaManager(val config: KafkaConfig,
           Some(new InvalidTopicException(s"Cannot append to internal topic ${topicPartition.topic}"))))
       } else {
         try {
-          val partition = getPartitionOrException(topicPartition)
-          val info = partition.appendRecordsToLeader(records, origin, requiredAcks, requestLocal)
-          val numAppendedMessages = info.numMessages
+          val partition = getPartitionOrException(topicPartition)   //获取partiton对象
+          val info = partition.appendRecordsToLeader(records, origin, requiredAcks, requestLocal)   //往leader partition的log里面写
+          val numAppendedMessages = info.numMessages //计算一次写入的message数量
 
           // update stats for successfully appended bytes and messages as bytesInRate and messageInRate
           brokerTopicStats.topicStats(topicPartition.topic).bytesInRate.mark(records.sizeInBytes)
@@ -1076,7 +1077,7 @@ class ReplicaManager(val config: KafkaConfig,
       // try to complete the request immediately, otherwise put it into the purgatory;
       // this is because while the delayed fetch operation is being created, new requests
       // may arrive and hence make this operation completable.
-      delayedFetchPurgatory.tryCompleteElseWatch(delayedFetch, delayedFetchKeys)
+      delayedFetchPurgatory.tryCompleteElseWatch(delayedFetch, delayedFetchKeys)  //hold 住消费者的拉取请求
     }
   }
 
@@ -1089,7 +1090,7 @@ class ReplicaManager(val config: KafkaConfig,
     quota: ReplicaQuota,
     readFromPurgatory: Boolean
   ): Seq[(TopicIdPartition, LogReadResult)] = {
-    val traceEnabled = isTraceEnabled
+    val  traceEnabled = isTraceEnabled
 
     def read(tp: TopicIdPartition, fetchInfo: PartitionData, limitBytes: Int, minOneMessage: Boolean): LogReadResult = {
       val offset = fetchInfo.fetchOffset
@@ -1363,7 +1364,7 @@ class ReplicaManager(val config: KafkaConfig,
               case HostedPartition.Online(partition) =>
                 Some(partition)
 
-              case HostedPartition.None =>
+              case HostedPartition.None =>  //创建partition实例
                 val partition = Partition(topicPartition, time, this)
                 allPartitions.putIfNotExists(topicPartition, HostedPartition.Online(partition))
                 Some(partition)

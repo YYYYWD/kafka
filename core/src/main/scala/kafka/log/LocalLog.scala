@@ -170,7 +170,9 @@ class LocalLog(@volatile private var _dir: File,
   private[log] def flush(offset: Long): Unit = {
     val currentRecoveryPoint = recoveryPoint
     if (currentRecoveryPoint <= offset) {
+      // 通过offset找到要刷盘的segment
       val segmentsToFlush = segments.values(currentRecoveryPoint, offset)
+      // 将当前segment下的所有file刷盘
       segmentsToFlush.foreach(_.flush())
       // If there are any new segments, we need to flush the parent directory for crash consistency.
       if (segmentsToFlush.exists(_.baseOffset >= currentRecoveryPoint))
@@ -199,7 +201,10 @@ class LocalLog(@volatile private var _dir: File,
    * @param endOffset the new end offset of the log
    */
   private[log] def updateLogEndOffset(endOffset: Long): Unit = {
+    // 真正更新LEO
     nextOffsetMetadata = LogOffsetMetadata(endOffset, segments.activeSegment.baseOffset, segments.activeSegment.size)
+    // TODO 这里其实是个比较奇怪的逻辑，作者应该是想要兼容 recoveryPoint 设置异常的场景，正常来说 recoveryPoint 永远都不会超过 endOffset
+    // recoveryPoint其实是个offset，在recoveryPoint之前的offset都已经刷盘了
     if (recoveryPoint > endOffset) {
       updateRecoveryPoint(endOffset)
     }
@@ -261,17 +266,24 @@ class LocalLog(@volatile private var _dir: File,
    * @return the segments ready to be deleted
    */
   private[log] def deletableSegments(predicate: (LogSegment, Option[LogSegment]) => Boolean): Iterable[LogSegment] = {
-    if (segments.isEmpty) {
+    if (segments.isEmpty) { // 如果当前压根就没有任何日志段对象，直接返回
       Seq.empty
     } else {
       val deletable = ArrayBuffer.empty[LogSegment]
       val segmentsIterator = segments.values.iterator
       var segmentOpt = nextOption(segmentsIterator)
+      // 从具有最小起始位移值的日志段对象开始遍历，直到满足以下条件之一便停止遍历：
+      // 1. 测定条件函数predicate = false
+      // 2. 扫描到包含Log对象高水位值所在的日志段对象
+      // 3. 最新的日志段对象不包含任何消息
+      // 最新日志段对象是segments中Key值最大对应的那个日志段，也就是我们常说的Active Segment。完全为空的Active Segment如果被允许删除，
+      // 后面还要重建它，故代码这里不允许删除大小为空的Active Segment。
+      // 在遍历过程中，同时不满足以上3个条件的所有日志段都是可以被删除的！
       while (segmentOpt.isDefined) {
         val segment = segmentOpt.get
         val nextSegmentOpt = nextOption(segmentsIterator)
-        val isLastSegmentAndEmpty = nextSegmentOpt.isEmpty && segment.size == 0
-        if (predicate(segment, nextSegmentOpt) && !isLastSegmentAndEmpty) {
+        val isLastSegmentAndEmpty = nextSegmentOpt.isEmpty && segment.size == 0 //判断不是最后两个segment
+        if (predicate(segment, nextSegmentOpt) && !isLastSegmentAndEmpty) { //判断是否满足条件
           deletable += segment
           segmentOpt = nextSegmentOpt
         } else {
@@ -309,7 +321,7 @@ class LocalLog(@volatile private var _dir: File,
       val toDelete = segmentsToDelete.toList
       reason.logReason(toDelete)
       toDelete.foreach { segment =>
-        segments.remove(segment.baseOffset)
+        segments.remove(segment.baseOffset)   //移除内存中的segment对象
       }
       LocalLog.deleteSegmentFiles(toDelete, asyncDelete, dir, topicPartition, config, scheduler, logDirFailureChannel, logIdent)
     }
@@ -385,39 +397,44 @@ class LocalLog(@volatile private var _dir: File,
     maybeHandleIOException(s"Exception while reading from $topicPartition in dir ${dir.getParent}") {
       trace(s"Reading maximum $maxLength bytes at offset $startOffset from log with " +
         s"total length ${segments.sizeInBytes} bytes")
-
+      // 读取消息时没有使用Monitor锁同步机制，因此这里取巧了，用本地变量的方式把LEO对象保存起来，避免争用（race condition）
       val endOffsetMetadata = nextOffsetMetadata
       val endOffset = endOffsetMetadata.messageOffset
-      var segmentOpt = segments.floorSegment(startOffset)
+      var segmentOpt = segments.floorSegment(startOffset)     // 找到startOffset值所在的日志段对象。注意要使用floorEntry方法
 
       // return error on attempt to read beyond the log end offset
+      // 满足以下条件之一将被视为消息越界，即你要读取的消息不在该Log对象中：
+      // 1. 要读取的消息位移超过了LEO值
+      // 2. 没找到对应的日志段对象
+      // 3. 要读取的消息在Log Start Offset之下，同样是对外不可见的消息
       if (startOffset > endOffset || segmentOpt.isEmpty)
         throw new OffsetOutOfRangeException(s"Received request for offset $startOffset for partition $topicPartition, " +
           s"but we only have log segments upto $endOffset.")
 
       if (startOffset == maxOffsetMetadata.messageOffset)
         emptyFetchDataInfo(maxOffsetMetadata, includeAbortedTxns)
-      else if (startOffset > maxOffsetMetadata.messageOffset)
+      else if (startOffset > maxOffsetMetadata.messageOffset)// 如果要读取的起始位置超过了能读取的最大位置，返回空的消息集合，因为没法读取任何消息
         emptyFetchDataInfo(convertToOffsetMetadataOrThrow(startOffset), includeAbortedTxns)
       else {
         // Do the read on the segment with a base offset less than the target offset
         // but if that segment doesn't contain any messages with an offset greater than that
         // continue to read from successive segments until we get some messages or we reach the end of the log
         var fetchDataInfo: FetchDataInfo = null
-        while (fetchDataInfo == null && segmentOpt.isDefined) {
+        while (fetchDataInfo == null && segmentOpt.isDefined) { // 开始遍历日志段对象，直到读出东西来或者读到日志末尾
           val segment = segmentOpt.get
           val baseOffset = segment.baseOffset
+
 
           val maxPosition =
           // Use the max offset position if it is on this segment; otherwise, the segment size is the limit.
             if (maxOffsetMetadata.segmentBaseOffset == segment.baseOffset) maxOffsetMetadata.relativePositionInSegment
             else segment.size
-
+          // 调用日志段对象的read方法执行真正的读取消息操作
           fetchDataInfo = segment.read(startOffset, maxLength, maxPosition, minOneMessage)
-          if (fetchDataInfo != null) {
+          if (fetchDataInfo != null) {  //如果有返回的消息就直接返回
             if (includeAbortedTxns)
               fetchDataInfo = addAbortedTransactions(startOffset, segment, fetchDataInfo)
-          } else segmentOpt = segments.higherSegment(baseOffset)
+          } else segmentOpt = segments.higherSegment(baseOffset)  // 如果没有返回任何消息，去下一个日志段对象试试
         }
 
         if (fetchDataInfo != null) fetchDataInfo
@@ -425,15 +442,24 @@ class LocalLog(@volatile private var _dir: File,
           // okay we are beyond the end of the last segment with no data fetched although the start offset is in range,
           // this can happen when all messages with offset larger than start offsets have been deleted.
           // In this case, we will return the empty set with log end offset metadata
-          FetchDataInfo(nextOffsetMetadata, MemoryRecords.EMPTY)
+          FetchDataInfo(nextOffsetMetadata, MemoryRecords.EMPTY)    // 已经读到日志末尾还是没有数据返回，只能返回空消息集合
         }
       }
     }
   }
-
+  /**
+   * 写入数据
+   *
+   * @param lastOffset  当前MemoryRecords的最后一条消息的offset
+   * @param largestTimestamp  当前MemoryRecords的最大时间戳
+   * @param shallowOffsetOfMaxTimestamp 当前MemoryRecords最大时间戳那条消息对应的offset
+   * @param records MemoryRecords
+   */
   private[log] def append(lastOffset: Long, largestTimestamp: Long, shallowOffsetOfMaxTimestamp: Long, records: MemoryRecords): Unit = {
+    // 激活segment的消息写入动作，包括.log   .index   .timeindex
     segments.activeSegment.append(largestOffset = lastOffset, largestTimestamp = largestTimestamp,
       shallowOffsetOfMaxTimestamp = shallowOffsetOfMaxTimestamp, records = records)
+    // 更新LEO，将其+1，这块还有后续逻辑
     updateLogEndOffset(lastOffset + 1)
   }
 
@@ -487,15 +513,21 @@ class LocalLog(@volatile private var _dir: File,
    *
    * @return The newly rolled segment
    */
+    //激活一个新的segment
   private[log] def roll(expectedNextOffset: Option[Long] = None): LogSegment = {
     maybeHandleIOException(s"Error while rolling log segment for $topicPartition in dir ${dir.getParent}") {
       val start = time.hiResClockMs()
       checkIfMemoryMappedBufferClosed()
+      // 如果没有传入expectedNextOffset，默认使用LEO
       val newOffset = math.max(expectedNextOffset.getOrElse(0L), logEndOffset)
+      // 新建一个log文件，文件名为  {offset}.log，例如 00000000003842334.log
       val logFile = LocalLog.logFile(dir, newOffset)
+      // 拿到segments集合中的最后一个segment，也就是当前正在激活的segment
       val activeSegment = segments.activeSegment
+      // 最新的segment已经建立出来了
       if (segments.contains(newOffset)) {
         // segment with the same base offset already exists and loaded
+        // 检查激活的segment是否与要roll的最新的segment的baseOffset保持一致，且当前没有数据
         if (activeSegment.baseOffset == newOffset && activeSegment.size == 0) {
           // We have seen this happen (see KAFKA-6388) after shouldRoll() returns true for an
           // active segment of size zero because of one of the indexes is "full" (due to _maxEntries == 0).
@@ -517,28 +549,33 @@ class LocalLog(@volatile private var _dir: File,
           s"Trying to roll a new log segment for topic partition $topicPartition with " +
             s"start offset $newOffset =max(provided offset = $expectedNextOffset, LEO = $logEndOffset) lower than start offset of the active segment $activeSegment")
       } else {
+        // 新建index文件，例如 00000000003842334.index
         val offsetIdxFile = offsetIndexFile(dir, newOffset)
+        // 新建timeIndex文件，例如 00000000003842334.timeindex
         val timeIdxFile = timeIndexFile(dir, newOffset)
+        // 新建事务文件，例如 00000000003842334.txnindex
         val txnIdxFile = transactionIndexFile(dir, newOffset)
-
+        // 如果上述的4个文件已经存在，那么首先将其删除
         for (file <- List(logFile, offsetIdxFile, timeIdxFile, txnIdxFile) if file.exists) {
           warn(s"Newly rolled segment file ${file.getAbsolutePath} already exists; deleting it first")
           Files.delete(file.toPath)
         }
-
+        // 将当前正在激活的segment变成未激活状态
         segments.lastSegment.foreach(_.onBecomeInactiveSegment())
       }
-
+      // 新建一个全新的segment
       val newSegment = LogSegment.open(dir,
         baseOffset = newOffset,
         config,
         time = time,
         initFileSize = config.initFileSize,
         preallocate = config.preallocate)
+      // 将最新的segment加入管理集合中
       segments.add(newSegment)
 
       // We need to update the segment base offset and append position data of the metadata when log rolls.
       // The next offset should not change.
+      // 成员变量nextOffsetMetadata需要修改
       updateLogEndOffset(nextOffsetMetadata.messageOffset)
 
       info(s"Rolled new log segment at offset $newOffset in ${time.hiResClockMs() - start} ms.")

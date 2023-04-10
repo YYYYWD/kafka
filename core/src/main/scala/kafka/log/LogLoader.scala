@@ -157,12 +157,12 @@ class LogLoader(
       // call to loadSegmentFiles().
       segments.close()
       segments.clear()
-      loadSegmentFiles()
+      loadSegmentFiles()    //加载该log文件的日志段元数据
     })
 
     val (newRecoveryPoint: Long, nextOffset: Long) = {
       if (!dir.getAbsolutePath.endsWith(UnifiedLog.DeleteDirSuffix)) {
-        val (newRecoveryPoint, nextOffset) = retryOnOffsetOverflow(recoverLog)
+        val (newRecoveryPoint, nextOffset) = retryOnOffsetOverflow(recoverLog)  //恢复Log的日志内容
 
         // reset the index size of the currently active log segment to allow more entries
         segments.lastSegment.get.resizeIndexes(config.maxIndexSize)

@@ -583,14 +583,18 @@ class KafkaController(val config: KafkaConfig,
    */
   private def onBrokerFailure(deadBrokers: Seq[Int]): Unit = {
     info(s"Broker failure callback for ${deadBrokers.mkString(",")}")
+    // deadBrokers：给定的一组已终止运行的Broker Id列表
+    // 更新Controller元数据信息，将给定Broker从元数据的replicasOnOfflineDirs中移除
     deadBrokers.foreach(controllerContext.replicasOnOfflineDirs.remove)
+    // 找出这些Broker上的所有副本对象
     val deadBrokersThatWereShuttingDown =
       deadBrokers.filter(id => controllerContext.shuttingDownBrokerIds.remove(id))
     if (deadBrokersThatWereShuttingDown.nonEmpty)
       info(s"Removed ${deadBrokersThatWereShuttingDown.mkString(",")} from list of shutting down brokers.")
     val allReplicasOnDeadBrokers = controllerContext.replicasOnBrokers(deadBrokers.toSet)
+    // 执行副本清扫工作
     onReplicasBecomeOffline(allReplicasOnDeadBrokers)
-
+    // 取消这些Broker上注册的ZooKeeper监听器
     unregisterBrokerModificationsHandler(deadBrokers)
   }
 
@@ -1632,11 +1636,11 @@ class KafkaController(val config: KafkaConfig,
 
   private def processTopicChange(): Unit = {
     if (!isActive) return
-    val topics = zkClient.getAllTopicsInCluster(true)
-    val newTopics = topics -- controllerContext.allTopics
-    val deletedTopics = controllerContext.allTopics.diff(topics)
-    controllerContext.setAllTopics(topics)
-
+    val topics = zkClient.getAllTopicsInCluster(true) // 从ZooKeeper中获取当前所有主题列表
+    val newTopics = topics -- controllerContext.allTopics   // 找出当前元数据中不存在、ZooKeeper中存在的主题，视为新增主题
+    val deletedTopics = controllerContext.allTopics.diff(topics)    // 找出当前元数据中存在、ZooKeeper中不存在的主题，视为已删除主题
+    controllerContext.setAllTopics(topics)  // 更新Controller元数据
+    // 为新增主题和已删除主题执行后续处理操作
     registerPartitionModificationsHandlers(newTopics.toSeq)
     val addedPartitionReplicaAssignment = zkClient.getReplicaAssignmentAndTopicIdForTopics(newTopics)
     deletedTopics.foreach(controllerContext.removeTopic)
@@ -2722,8 +2726,9 @@ case class LeaderIsrAndControllerEpoch(leaderAndIsr: LeaderAndIsr, controllerEpo
 }
 
 private[controller] class ControllerStats extends KafkaMetricsGroup {
+    // 统计每秒发生的Unclean Leader选举次数
   val uncleanLeaderElectionRate = newMeter("UncleanLeaderElectionsPerSec", "elections", TimeUnit.SECONDS)
-
+  // Controller事件通用的统计速率指标的方法
   val rateAndTimeMetrics: Map[ControllerState, KafkaTimer] = ControllerState.values.flatMap { state =>
     state.rateAndTimeMetricName.map { metricName =>
       state -> new KafkaTimer(newTimer(metricName, TimeUnit.MILLISECONDS, TimeUnit.SECONDS))

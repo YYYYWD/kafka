@@ -332,6 +332,7 @@ class LogManager(logDirs: Seq[File],
   /**
    * Recover and load all logs in the given data directories
    */
+    //从磁盘中加载Log信息，并执行恢复日志操作
   private[log] def loadLogs(defaultConfig: LogConfig, topicConfigOverrides: Map[String, LogConfig]): Unit = {
     info(s"Loading logs from log dirs $liveLogDirs")
     val startMs = time.hiResClockMs()
@@ -356,7 +357,7 @@ class LogManager(logDirs: Seq[File],
         val pool = Executors.newFixedThreadPool(numRecoveryThreadsPerDataDir,
           new LogRecoveryThreadFactory(logDirAbsolutePath))
         threadPools.append(pool)
-
+        //判断是否是cleanshutdown
         val cleanShutdownFile = new File(dir, LogLoader.CleanShutdownFile)
         if (cleanShutdownFile.exists) {
           info(s"Skipping recovery for all logs in $logDirAbsolutePath since clean shutdown file was found")
@@ -386,7 +387,7 @@ class LogManager(logDirs: Seq[File],
             warn(s"Error occurred while reading log-start-offset-checkpoint file of directory " +
               s"$logDirAbsolutePath, resetting to the base offset of the first segment", e)
         }
-
+        //查询待恢复的log日志文件名称
         val logsToLoad = Option(dir.listFiles).getOrElse(Array.empty).filter(logDir =>
           logDir.isDirectory && UnifiedLog.parseTopicPartitionName(logDir).topic != KafkaRaftServer.MetadataTopic)
         numTotalLogs += logsToLoad.length
@@ -398,8 +399,9 @@ class LogManager(logDirs: Seq[File],
             var log = None: Option[UnifiedLog]
             val logLoadStartMs = time.hiResClockMs()
             try {
+              //异步恢复日志
               log = Some(loadLog(logDir, hadCleanShutdown, recoveryPoints, logStartOffsets,
-                defaultConfig, topicConfigOverrides, numRemainingSegments))
+                defaultConfig, topicConfigOverrides, numRemainingSegments)) //加载log文件信息
             } catch {
               case e: IOException =>
                 handleIOException(logDirAbsolutePath, e)
@@ -429,7 +431,7 @@ class LogManager(logDirs: Seq[File],
 
     try {
       addLogRecoveryMetrics(numRemainingLogs, numRemainingSegments)
-      for (dirJobs <- jobs) {
+      for (dirJobs <- jobs) { //jobs是FutureTask的集合
         dirJobs.foreach(_.get)
       }
 
@@ -517,29 +519,30 @@ class LogManager(logDirs: Seq[File],
   }
 
   // visible for testing
+  //启动多个定时任务完成日志的加载和清理工作
   private[log] def startupWithConfigOverrides(defaultConfig: LogConfig, topicConfigOverrides: Map[String, LogConfig]): Unit = {
-    loadLogs(defaultConfig, topicConfigOverrides) // this could take a while if shutdown was not clean
+    loadLogs(defaultConfig, topicConfigOverrides) // this could take a while if shutdown was not clean  //从磁盘中加载Log信息，并执行恢复日志操作
 
     /* Schedule the cleanup task to delete old logs */
     if (scheduler != null) {
       info("Starting log cleanup with a period of %d ms.".format(retentionCheckMs))
-      scheduler.schedule("kafka-log-retention",
+      scheduler.schedule("kafka-log-retention",//负责定时清理历史数据
                          cleanupLogs _,
                          delay = InitialTaskDelayMs,
                          period = retentionCheckMs,
                          TimeUnit.MILLISECONDS)
       info("Starting log flusher with a default period of %d ms.".format(flushCheckMs))
-      scheduler.schedule("kafka-log-flusher",
+      scheduler.schedule("kafka-log-flusher",//负责定时刷盘
                          flushDirtyLogs _,
                          delay = InitialTaskDelayMs,
                          period = flushCheckMs,
                          TimeUnit.MILLISECONDS)
-      scheduler.schedule("kafka-recovery-point-checkpoint",
+      scheduler.schedule("kafka-recovery-point-checkpoint", //定期将Log的recovery-point写入文件
                          checkpointLogRecoveryOffsets _,
                          delay = InitialTaskDelayMs,
                          period = flushRecoveryOffsetCheckpointMs,
                          TimeUnit.MILLISECONDS)
-      scheduler.schedule("kafka-log-start-offset-checkpoint",
+      scheduler.schedule("kafka-log-start-offset-checkpoint", //定期将Log start offset写入文件
                          checkpointLogStartOffsets _,
                          delay = InitialTaskDelayMs,
                          period = flushStartOffsetCheckpointMs,
@@ -549,7 +552,7 @@ class LogManager(logDirs: Seq[File],
                          delay = InitialTaskDelayMs,
                          unit = TimeUnit.MILLISECONDS)
     }
-    if (cleanerConfig.enableCleaner) {
+    if (cleanerConfig.enableCleaner) {//启动LogCleaner组件，负责对主题数据进行压缩去重
       _cleaner = new LogCleaner(cleanerConfig, liveLogDirs, currentLogs, logDirFailureChannel, time = time)
       _cleaner.startup()
     }
@@ -1112,7 +1115,7 @@ class LogManager(logDirs: Seq[File],
     * add it in the queue for deletion.
     *
     * @param topicPartition TopicPartition that needs to be deleted
-    * @param isFuture True iff the future log of the specified partition should be deleted
+    * @param isFuture True if the future log of the specified partition should be deleted
     * @param checkpoint True if checkpoints must be written
     * @return the removed log
     */
