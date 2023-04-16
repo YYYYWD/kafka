@@ -550,7 +550,7 @@ class LocalLog(@volatile private var _dir: File,
             s"start offset $newOffset =max(provided offset = $expectedNextOffset, LEO = $logEndOffset) lower than start offset of the active segment $activeSegment")
       } else {
         // 新建index文件，例如 00000000003842334.index
-        val offsetIdxFile = offsetIndexFile(dir, newOffset)
+        val offsetIdxFile = offsetIndexFile(dir, newOffset)   // TODO nas
         // 新建timeIndex文件，例如 00000000003842334.timeindex
         val timeIdxFile = timeIndexFile(dir, newOffset)
         // 新建事务文件，例如 00000000003842334.txnindex

@@ -303,7 +303,7 @@ class LogLoader(
    *
    * @throws LogSegmentOffsetOverflowException if the log directory contains a segment with messages that overflow the index offset
    */
-  private def loadSegmentFiles(): Unit = {
+  private def loadSegmentFiles(): Unit = {      // TODO 启动加载索引
     // load segments in ascending order because transactional data from one segment may depend on the
     // segments that come before it
     for (file <- dir.listFiles.sortBy(_.getName) if file.isFile) {
@@ -319,7 +319,7 @@ class LogLoader(
         // if it's a log file, load the corresponding log segment
         val baseOffset = offsetFromFile(file)
         val timeIndexFileNewlyCreated = !UnifiedLog.timeIndexFile(dir, baseOffset).exists()
-        val segment = LogSegment.open(
+        val segment = LogSegment.open(    // 加载log到内存中
           dir = dir,
           baseOffset = baseOffset,
           config,
@@ -332,7 +332,7 @@ class LogLoader(
             if (hadCleanShutdown || segment.baseOffset < recoveryPointCheckpoint)
               error(s"Could not find offset index file corresponding to log file" +
                 s" ${segment.log.file.getAbsolutePath}, recovering segment and rebuilding index files...")
-            recoverSegment(segment)
+            recoverSegment(segment)       // index找不到就会触发
           case e: CorruptIndexException =>
             warn(s"Found a corrupted index file corresponding to log file" +
               s" ${segment.log.file.getAbsolutePath} due to ${e.getMessage}}, recovering segment and" +
@@ -410,7 +410,7 @@ class LogLoader(
 
     // If we have the clean shutdown marker, skip recovery.
     if (!hadCleanShutdown) {
-      val unflushed = segments.values(recoveryPointCheckpoint, Long.MaxValue)
+      val unflushed = segments.values(recoveryPointCheckpoint, Long.MaxValue)   // 找到大于recoveryPointCheckpoint的segment
       val numUnflushed = unflushed.size
       val unflushedIter = unflushed.iterator
       var truncated = false

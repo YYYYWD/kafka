@@ -73,6 +73,7 @@ object Defaults {
   val FollowerReplicationThrottledReplicas = Collections.emptyList[String]()
   val MaxIdMapSnapshots = kafka.server.Defaults.MaxIdMapSnapshots
   val MessageDownConversionEnable = kafka.server.Defaults.MessageDownConversionEnable
+  val NasMountPoint = kafka.server.Defaults.NasMountPoint
 }
 
 case class LogConfig(props: java.util.Map[_, _], overriddenConfigs: Set[String] = Set.empty)
@@ -112,6 +113,8 @@ case class LogConfig(props: java.util.Map[_, _], overriddenConfigs: Set[String] 
   val LeaderReplicationThrottledReplicas = getList(LogConfig.LeaderReplicationThrottledReplicasProp)
   val FollowerReplicationThrottledReplicas = getList(LogConfig.FollowerReplicationThrottledReplicasProp)
   val messageDownConversionEnable = getBoolean(LogConfig.MessageDownConversionEnableProp)
+
+  val nasMountPoint = getString(LogConfig.NasMountPointProp)
 
   class RemoteLogConfig {
     val remoteStorageEnable = getBoolean(LogConfig.RemoteLogStorageEnableProp)
@@ -227,6 +230,8 @@ object LogConfig {
   val LeaderReplicationThrottledReplicasProp = "leader.replication.throttled.replicas"
   val FollowerReplicationThrottledReplicasProp = "follower.replication.throttled.replicas"
 
+  val NasMountPointProp = "nas.mount.point"
+
   val SegmentSizeDoc = TopicConfig.SEGMENT_BYTES_DOC
   val SegmentMsDoc = TopicConfig.SEGMENT_MS_DOC
   val SegmentJitterMsDoc = TopicConfig.SEGMENT_JITTER_MS_DOC
@@ -267,6 +272,8 @@ object LogConfig {
     "the follower side. The list should describe a set of " + "replicas in the form " +
     "[PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the wildcard '*' can be used to throttle " +
     "all replicas for this topic."
+
+  val NasMountPointDoc = "nas mount point"
 
   private[log] val ServerDefaultHeaderName = "Server Default Property"
 
@@ -381,6 +388,7 @@ object LogConfig {
         FollowerReplicationThrottledReplicasDoc, FollowerReplicationThrottledReplicasProp)
       .define(MessageDownConversionEnableProp, BOOLEAN, Defaults.MessageDownConversionEnable, LOW,
         MessageDownConversionEnableDoc, KafkaConfig.LogMessageDownConversionEnableProp)
+      .define(NasMountPointProp, STRING, Defaults.NasMountPoint, MEDIUM, NasMountPointDoc, KafkaConfig.NasMountPointProp)
 
     // RemoteLogStorageEnableProp, LocalLogRetentionMsProp, LocalLogRetentionBytesProp do not have server default
     // config names.
@@ -559,6 +567,7 @@ object LogConfig {
     logProps.put(MessageTimestampTypeProp, kafkaConfig.logMessageTimestampType.name)
     logProps.put(MessageTimestampDifferenceMaxMsProp, kafkaConfig.logMessageTimestampDifferenceMaxMs: java.lang.Long)
     logProps.put(MessageDownConversionEnableProp, kafkaConfig.logMessageDownConversionEnable: java.lang.Boolean)
+    logProps.put(LogConfig.NasMountPointProp, kafkaConfig.nasMountPoint: java.lang.String)
     logProps
   }
 

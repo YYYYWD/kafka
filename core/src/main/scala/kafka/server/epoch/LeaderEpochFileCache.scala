@@ -68,7 +68,7 @@ class LeaderEpochFileCache(topicPartition: TopicPartition,
     def isUpdateNeeded: Boolean = {
       latestEntry match {
         case Some(lastEntry) =>
-          entry.epoch != lastEntry.epoch || entry.startOffset < lastEntry.startOffset
+          entry.epoch != lastEntry.epoch || entry.startOffset < lastEntry.startOffset   //只有当前epoch != lastEntry.epoch 且当前epoch对应的startOffset > lastEntry的startOffset 才会更新
         case None =>
           true
       }

@@ -112,11 +112,11 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
     }
   }
 
-  private def relativeOffset(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * entrySize)
+  private def relativeOffset(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * entrySize)    // 索引entry key： 相对offset
 
-  private def physical(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * entrySize + 4)
+  private def physical(buffer: ByteBuffer, n: Int): Int = buffer.getInt(n * entrySize + 4)    // 索引entry value： position
 
-  override protected def parseEntry(buffer: ByteBuffer, n: Int): OffsetPosition = {
+  override protected def parseEntry(buffer: ByteBuffer, n: Int): OffsetPosition = {   // 计算Index中 第n个Entry的值
     OffsetPosition(baseOffset + relativeOffset(buffer, n), physical(buffer, n))
   }
 
@@ -144,6 +144,7 @@ class OffsetIndex(_file: File, baseOffset: Long, maxIndexSize: Int = -1, writabl
       require(!isFull, "Attempt to append to a full index (size = " + _entries + ").")
       if (_entries == 0 || offset > _lastOffset) {
         trace(s"Adding index entry $offset => $position to ${file.getAbsolutePath}")
+        // mmap写操作
         mmap.putInt(relativeOffset(offset))
         mmap.putInt(position)
         _entries += 1

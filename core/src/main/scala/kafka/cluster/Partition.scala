@@ -964,6 +964,7 @@ class Partition(val topicPartition: TopicPartition,
    *
    * @return true if the HW was incremented, and false otherwise.
    */
+    // 核心变更HW的代码
   private def maybeIncrementLeaderHW(leaderLog: UnifiedLog, currentTimeMs: Long = time.milliseconds): Boolean = {
     // maybeIncrementLeaderHW is in the hot path, the following code is written to
     // avoid unnecessary collection generation

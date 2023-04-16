@@ -953,9 +953,9 @@ class ReplicaManager(val config: KafkaConfig,
           Some(new InvalidTopicException(s"Cannot append to internal topic ${topicPartition.topic}"))))
       } else {
         try {
-          val partition = getPartitionOrException(topicPartition)   //获取partiton对象
-          val info = partition.appendRecordsToLeader(records, origin, requiredAcks, requestLocal)   //往leader partition的log里面写
-          val numAppendedMessages = info.numMessages //计算一次写入的message数量
+          val partition = getPartitionOrException(topicPartition)   // 获取partiton对象
+          val info = partition.appendRecordsToLeader(records, origin, requiredAcks, requestLocal)   // 往leader partition的log里面写
+          val numAppendedMessages = info.numMessages // 计算一次写入的message数量
 
           // update stats for successfully appended bytes and messages as bytesInRate and messageInRate
           brokerTopicStats.topicStats(topicPartition.topic).bytesInRate.mark(records.sizeInBytes)

@@ -72,7 +72,7 @@ public class CheckpointFile<T> {
         tempPath = Paths.get(absolutePath.toString() + ".tmp");
     }
 
-    public void write(Collection<T> entries) throws IOException {
+    public void write(Collection<T> entries) throws IOException {  // TODO checkpoint真正写入的时刻
         synchronized (lock) {
             // write to temp file and then swap with the existing file
             try (FileOutputStream fileOutputStream = new FileOutputStream(tempPath.toFile());
@@ -92,7 +92,7 @@ public class CheckpointFile<T> {
                 }
 
                 writer.flush();
-                fileOutputStream.getFD().sync();
+                fileOutputStream.getFD().sync();        // 强制刷盘
             }
 
             Utils.atomicMoveWithFallback(tempPath, absolutePath);

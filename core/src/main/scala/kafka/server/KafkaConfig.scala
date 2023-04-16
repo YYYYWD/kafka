@@ -300,6 +300,9 @@ object Defaults {
   val QuorumLingerMs = RaftConfig.DEFAULT_QUORUM_LINGER_MS
   val QuorumRequestTimeoutMs = RaftConfig.DEFAULT_QUORUM_REQUEST_TIMEOUT_MS
   val QuorumRetryBackoffMs = RaftConfig.DEFAULT_QUORUM_RETRY_BACKOFF_MS
+
+  /** ********* Nas Configuration ************* */
+  val NasMountPoint = ""
 }
 
 object KafkaConfig {
@@ -640,6 +643,9 @@ object KafkaConfig {
   val PasswordEncoderCipherAlgorithmProp = "password.encoder.cipher.algorithm"
   val PasswordEncoderKeyLengthProp =  "password.encoder.key.length"
   val PasswordEncoderIterationsProp =  "password.encoder.iterations"
+
+  /** ********* nas-related configs ******** */
+  val NasMountPointProp = "nas.mount.point"
 
   /* Documentation */
   /** ********* Zookeeper Configuration ***********/
@@ -1091,6 +1097,8 @@ object KafkaConfig {
   val PasswordEncoderKeyLengthDoc =  "The key length used for encoding dynamically configured passwords."
   val PasswordEncoderIterationsDoc =  "The iteration count used for encoding dynamically configured passwords."
 
+  val NasMountPointDoc = "Nas mount point"
+
   @nowarn("cat=deprecation")
   private[server] val configDef = {
     import ConfigDef.Importance._
@@ -1402,6 +1410,9 @@ object KafkaConfig {
       .define(RaftConfig.QUORUM_LINGER_MS_CONFIG, INT, Defaults.QuorumLingerMs, null, MEDIUM, RaftConfig.QUORUM_LINGER_MS_DOC)
       .define(RaftConfig.QUORUM_REQUEST_TIMEOUT_MS_CONFIG, INT, Defaults.QuorumRequestTimeoutMs, null, MEDIUM, RaftConfig.QUORUM_REQUEST_TIMEOUT_MS_DOC)
       .define(RaftConfig.QUORUM_RETRY_BACKOFF_MS_CONFIG, INT, Defaults.QuorumRetryBackoffMs, null, LOW, RaftConfig.QUORUM_RETRY_BACKOFF_MS_DOC)
+
+      /** ********* Nas Configuration *********/
+      .define(NasMountPointProp, STRING, "", MEDIUM, NasMountPointDoc)
   }
 
   /** ********* Remote Log Management Configuration *********/
@@ -1920,6 +1931,9 @@ class KafkaConfig private(doLog: Boolean, val props: java.util.Map[_, _], dynami
   val quorumLingerMs = getInt(RaftConfig.QUORUM_LINGER_MS_CONFIG)
   val quorumRequestTimeoutMs = getInt(RaftConfig.QUORUM_REQUEST_TIMEOUT_MS_CONFIG)
   val quorumRetryBackoffMs = getInt(RaftConfig.QUORUM_RETRY_BACKOFF_MS_CONFIG)
+
+  /** Nas Configuration **/
+  val nasMountPoint = getString(KafkaConfig.NasMountPointProp)
 
   def addReconfigurable(reconfigurable: Reconfigurable): Unit = {
     dynamicConfig.addReconfigurable(reconfigurable)

@@ -216,6 +216,7 @@ set -- \
         "-Dorg.gradle.appname=$APP_BASE_NAME" \
         -classpath "$CLASSPATH" \
         org.gradle.wrapper.GradleWrapperMain \
+        -Dorg.gradle.warning.mode=all,fail,none,summary\
         "$@"
 
 # Use "xargs" to parse quoted args.

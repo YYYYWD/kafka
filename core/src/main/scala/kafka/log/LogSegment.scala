@@ -178,7 +178,7 @@ class LogSegment private[log] (val log: FileRecords,
 
       // append an entry to the index (if needed)
       // 如果写入的消息已经达到或超过某个阈值（indexIntervalBytes），那么写入稀疏索引
-      if (bytesSinceLastIndexEntry > indexIntervalBytes) {
+      if (bytesSinceLastIndexEntry > indexIntervalBytes) {  // TODO 写索引
         // 写入常规索引.index文件
         offsetIndex.append(largestOffset, physicalPosition)
         // 写入时间戳索引，.timeindex文件，第一个参数是时间戳，第二个参数是对应的offset
@@ -715,8 +715,8 @@ object LogSegment {
     // 索引文件的最大值，默认为10M
     val maxIndexSize = config.maxIndexSize
     new LogSegment(
-      FileRecords.open(UnifiedLog.logFile(dir, baseOffset, fileSuffix), fileAlreadyExists, initFileSize, preallocate),
-      LazyIndex.forOffset(UnifiedLog.offsetIndexFile(dir, baseOffset, fileSuffix), baseOffset = baseOffset, maxIndexSize = maxIndexSize),
+      FileRecords.open(UnifiedLog.logFile(dir, baseOffset, fileSuffix), fileAlreadyExists, initFileSize, preallocate),      //
+      LazyIndex.forOffset(UnifiedLog.offsetIndexFile(dir, baseOffset, fileSuffix), baseOffset = baseOffset, maxIndexSize = maxIndexSize),   // 加载index至内存中
       LazyIndex.forTime(UnifiedLog.timeIndexFile(dir, baseOffset, fileSuffix), baseOffset = baseOffset, maxIndexSize = maxIndexSize),
       new TransactionIndex(baseOffset, UnifiedLog.transactionIndexFile(dir, baseOffset, fileSuffix)),
       baseOffset,

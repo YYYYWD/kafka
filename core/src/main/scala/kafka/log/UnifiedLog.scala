@@ -854,7 +854,7 @@ class UnifiedLog(@volatile var logStartOffset: Long,
             validRecords = validateAndOffsetAssignResult.validatedRecords
             appendInfo.maxTimestamp = validateAndOffsetAssignResult.maxTimestamp
             appendInfo.offsetOfMaxTimestamp = validateAndOffsetAssignResult.shallowOffsetOfMaxTimestamp
-            appendInfo.lastOffset = offset.value - 1
+            appendInfo.lastOffset = offset.value - 1    // 当前已写入的最后一条消息的offset应该是LEO-1
             appendInfo.recordConversionStats = validateAndOffsetAssignResult.recordConversionStats
             if (config.messageTimestampType == TimestampType.LOG_APPEND_TIME)
               appendInfo.logAppendTime = now
@@ -1841,7 +1841,7 @@ object UnifiedLog extends Logging {
 
   val UnknownOffset = LocalLog.UnknownOffset
 
-  def apply(dir: File,
+  def apply(dir: File,    // TODO nas
             config: LogConfig,
             logStartOffset: Long,
             recoveryPoint: Long,
@@ -1859,7 +1859,7 @@ object UnifiedLog extends Logging {
     // create the log directory if it doesn't exist
     Files.createDirectories(dir.toPath)
     val topicPartition = UnifiedLog.parseTopicPartitionName(dir)
-    val segments = new LogSegments(topicPartition)
+    val segments = new LogSegments(topicPartition)      // 创建partition下的一系列segment对象
     val leaderEpochCache = UnifiedLog.maybeCreateLeaderEpochCache(
       dir,
       topicPartition,
@@ -1903,9 +1903,9 @@ object UnifiedLog extends Logging {
 
   def logDirName(topicPartition: TopicPartition): String = LocalLog.logDirName(topicPartition)
 
-  def offsetIndexFile(dir: File, offset: Long, suffix: String = ""): File = LocalLog.offsetIndexFile(dir, offset, suffix)
+  def offsetIndexFile(dir: File, offset: Long, suffix: String = ""): File = LocalLog.offsetIndexFile(dir, offset, suffix) // TODO 加上nas路径
 
-  def timeIndexFile(dir: File, offset: Long, suffix: String = ""): File = LocalLog.timeIndexFile(dir, offset, suffix)
+  def timeIndexFile(dir: File, offset: Long, suffix: String = ""): File = LocalLog.timeIndexFile(dir, offset, suffix) // TODO 加上nas路径
 
   def deleteFileIfExists(file: File, suffix: String = ""): Unit =
     Files.deleteIfExists(new File(file.getPath + suffix).toPath)
@@ -1978,7 +1978,7 @@ object UnifiedLog extends Logging {
                                   logDirFailureChannel: LogDirFailureChannel,
                                   recordVersion: RecordVersion,
                                   logPrefix: String): Option[LeaderEpochFileCache] = {
-    val leaderEpochFile = LeaderEpochCheckpointFile.newFile(dir)
+    val leaderEpochFile = LeaderEpochCheckpointFile.newFile(dir)    //打开partition文件夹下的leaderEpoch文件
 
     def newLeaderEpochFileCache(): LeaderEpochFileCache = {
       val checkpointFile = new LeaderEpochCheckpointFile(leaderEpochFile, logDirFailureChannel)
